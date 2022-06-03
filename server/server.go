@@ -69,6 +69,7 @@ func (s *Server) Run() {
 	defer f.Close()
 
 	log.Println("--- Listening for messages ---")
+
 	// TODO: exit consumer loop
 	for msg := range msgs {
 		s.demuxMessage(msg.Body)
@@ -141,10 +142,11 @@ func processMessage(store *OrderedMap, msg *common.Message, resultLog *log.Logge
 		}
 
 		l := store.GetAll()
-		resultLog.Println("All items requested:")
+		var keys string
 		for el := l.Front(); el != nil; el = el.Next() {
-			resultLog.Printf("%s, ", el.Value.(*Item).Key)
+			keys += fmt.Sprintf("%s, ", el.Value.(*Item).Key)
 		}
+		resultLog.Printf("All items requested: %s", keys)
 	default:
 		log.Printf("Unknown message type: %d", msg.Type)
 	}

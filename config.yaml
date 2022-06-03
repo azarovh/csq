@@ -2,6 +2,6 @@ user: guest
 password: guest 
 host: localhost
 port: 5672
-send_interval: 500 #ms
+send_interval: 100 #ms
 output_file: result.txt
 input_file: input.txt
