@@ -1,0 +1,33 @@
+add a v
+add b v
+add c v
+add d v
+add e v
+add f v
+add g v
+add h v
+add i v
+add j v
+add k v
+add l v
+add m v
+add n v
+add o v
+add p v
+add q v
+add r v
+add s v
+add t v
+add u v
+add v v
+add w v
+add x v
+add y v
+add z v
+getall
+rm k
+rm s
+rm a
+getall
+get i
+getall

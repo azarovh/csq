@@ -1,11 +1,16 @@
 package client
 
 import (
+	"bufio"
 	"csq/common"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 )
 
@@ -14,7 +19,8 @@ type Config struct {
 	Password     string `yaml:"password"`
 	Host         string `yaml:"host"`
 	Port         uint16 `yaml:"port"`
-	SendInterval uint16 `yaml:"send_interval"`
+	SendInterval uint   `yaml:"send_interval"`
+	Input        string `yaml:"input_file"`
 }
 
 type Client struct {
@@ -48,7 +54,6 @@ func (c *Client) Send() {
 	}
 
 	publish := func(body []byte) {
-		fmt.Println(string(body))
 		ch.Publish(
 			"",
 			q.Name,
@@ -60,23 +65,52 @@ func (c *Client) Send() {
 			})
 	}
 
-	additem, _ := json.Marshal(common.AddItem{TheItem: common.Item{Key: "a", Value: "v"}})
-	msg1, _ := json.Marshal(common.Message{Type: common.AddItemMessage, Data: additem})
-	publish(msg1)
+	id := uuid.New()
+	f, err := os.Open(c.config.Input)
+	if err != nil {
+		log.Fatalf("Error opening input file: %v\n", err)
+		return
+	}
+	scanner := bufio.NewScanner(f)
 
-	additem1, _ := json.Marshal(common.AddItem{TheItem: common.Item{Key: "b", Value: "v"}})
-	msg2, _ := json.Marshal(common.Message{Type: common.AddItemMessage, Data: additem1})
-	publish(msg2)
-
-	additem2, _ := json.Marshal(common.AddItem{TheItem: common.Item{Key: "c", Value: "v"}})
-	msg3, _ := json.Marshal(common.Message{Type: common.AddItemMessage, Data: additem2})
-	publish(msg3)
-
-	additem3, _ := json.Marshal(common.AddItem{TheItem: common.Item{Key: "d", Value: "v"}})
-	msg4, _ := json.Marshal(common.Message{Type: common.AddItemMessage, Data: additem3})
-	publish(msg4)
-
-	getallitems, _ := json.Marshal(common.GetAllItems{})
-	msg5, _ := json.Marshal(common.Message{Type: common.GetAllItemsMessage, Data: getallitems})
-	publish(msg5)
+	for scanner.Scan() {
+		line := strings.Split(scanner.Text(), " ")
+		if len(line) > 0 {
+			var serializedMsg []byte
+			switch line[0] {
+			case "add":
+				if len(line) < 3 {
+					log.Fatalln("Wrong number of argument to AddItem")
+					continue
+				}
+				item, _ := json.Marshal(common.AddItem{TheItem: common.Item{Key: line[1], Value: line[2]}})
+				msg := &common.Message{Sender: id.String(), Type: common.AddItemMessage, Data: item}
+				serializedMsg, _ = json.Marshal(msg)
+			case "rm":
+				if len(line) < 2 {
+					log.Fatalln("Wrong number of argument to AddItem")
+					continue
+				}
+				item, _ := json.Marshal(common.RemoveItem{Key: line[1]})
+				msg := &common.Message{Sender: id.String(), Type: common.RemoveItemMessage, Data: item}
+				serializedMsg, _ = json.Marshal(msg)
+			case "get":
+				if len(line) < 2 {
+					log.Fatalln("Wrong number of argument to AddItem")
+					continue
+				}
+				item, _ := json.Marshal(common.GetItem{Key: line[1]})
+				msg := &common.Message{Sender: id.String(), Type: common.GetItemMessage, Data: item}
+				serializedMsg, _ = json.Marshal(msg)
+			case "getall":
+				item, _ := json.Marshal(common.GetAllItems{})
+				msg := &common.Message{Sender: id.String(), Type: common.GetAllItemsMessage, Data: item}
+				serializedMsg, _ = json.Marshal(msg)
+			default:
+				log.Println("Unknown message type")
+			}
+			publish(serializedMsg)
+			time.Sleep(time.Duration(c.config.SendInterval) * time.Millisecond)
+		}
+	}
 }

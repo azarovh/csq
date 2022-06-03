@@ -2,6 +2,6 @@ user: guest
 password: guest 
 host: localhost
 port: 5672
-server_workers: 8
 send_interval: 500 #ms
-output_file: output.txt
+output_file: result.txt
+input_file: input.txt

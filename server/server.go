@@ -6,14 +6,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 
 	"github.com/streadway/amqp"
 )
 
 type Config struct {
-	Workers uint8 `yaml:"server_workers"`
-
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
 	Host     string `yaml:"host"`
@@ -25,20 +22,14 @@ type Config struct {
 type Server struct {
 	config Config
 
-	store     *OrderedMap
-	storeLock sync.RWMutex
-
-	//workersChan map[string]chan []byte
-	//workersLock sync.Mutex
+	workersChan map[string]chan *common.Message
 
 	resultLog *log.Logger
 }
 
-type worker struct {
-}
-
 func CreateServer(config Config) *Server {
-	return &Server{config: config, store: CreateOrderedMap(), resultLog: log.New(os.Stdout, "", log.LstdFlags)}
+	return &Server{config: config, workersChan: make(map[string]chan *common.Message),
+		resultLog: log.New(os.Stdout, "", log.LstdFlags)}
 }
 
 func (s *Server) Run() {
@@ -77,30 +68,18 @@ func (s *Server) Run() {
 	}
 	defer f.Close()
 
-	workersChan := make(chan []byte, s.config.Workers)
-	var wg sync.WaitGroup
-	for t := uint8(0); t < s.config.Workers; t++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for msg := range workersChan {
-				s.demuxMessage(msg)
-			}
-		}()
-	}
-
+	log.Println("--- Listening for messages ---")
+	// TODO: exit consumer loop
 	for msg := range msgs {
-		workersChan <- msg.Body
+		s.demuxMessage(msg.Body)
 	}
 
-	close(workersChan)
-	wg.Wait()
+	for _, c := range s.workersChan {
+		close(c)
+	}
 }
 
 func (s *Server) demuxMessage(data []byte) {
-}
-
-func (s *Server) processMessage(data []byte) {
 	msg := &common.Message{}
 	err := json.Unmarshal(data, msg)
 	if err != nil {
@@ -108,6 +87,20 @@ func (s *Server) processMessage(data []byte) {
 		return
 	}
 
+	if _, exist := s.workersChan[msg.Sender]; !exist {
+		workerChannel := make(chan *common.Message, 100)
+		s.workersChan[msg.Sender] = workerChannel
+		go func() {
+			store := CreateOrderedMap()
+			for msg := range workerChannel {
+				processMessage(store, msg, s.resultLog)
+			}
+		}()
+	}
+	s.workersChan[msg.Sender] <- msg
+}
+
+func processMessage(store *OrderedMap, msg *common.Message, resultLog *log.Logger) {
 	switch msg.Type {
 	case common.AddItemMessage:
 		addMsg := common.AddItem{}
@@ -116,11 +109,8 @@ func (s *Server) processMessage(data []byte) {
 			return
 		}
 
-		s.storeLock.Lock()
-		defer s.storeLock.Unlock()
-
-		s.store.Add(addMsg.TheItem.Key, addMsg.TheItem.Value)
-		s.resultLog.Printf("Item added {%v}", addMsg.TheItem)
+		store.Add(addMsg.TheItem.Key, addMsg.TheItem.Value)
+		resultLog.Printf("Item added {%v}", addMsg.TheItem)
 
 	case common.RemoveItemMessage:
 		rmMsg := common.RemoveItem{}
@@ -129,11 +119,8 @@ func (s *Server) processMessage(data []byte) {
 			return
 		}
 
-		s.storeLock.Lock()
-		defer s.storeLock.Unlock()
-
-		s.store.Remove(rmMsg.Key)
-		s.resultLog.Printf("Item removed {%s}", rmMsg.Key)
+		store.Remove(rmMsg.Key)
+		resultLog.Printf("Item removed {%s}", rmMsg.Key)
 	case common.GetItemMessage:
 		getMsg := common.GetItem{}
 		if err := json.Unmarshal(msg.Data, &getMsg); err != nil {
@@ -141,13 +128,10 @@ func (s *Server) processMessage(data []byte) {
 			return
 		}
 
-		s.storeLock.RLock()
-		defer s.storeLock.RUnlock()
-
-		if v := s.store.Get(getMsg.Key); v != nil {
-			s.resultLog.Printf("Item requested {%s}:{%s}", getMsg.Key, *v)
+		if v := store.Get(getMsg.Key); v != nil {
+			resultLog.Printf("Item requested {%s}:{%s}", getMsg.Key, *v)
 		} else {
-			s.resultLog.Printf("Item requested {%s} but not found", getMsg.Key)
+			resultLog.Printf("Item requested {%s} but not found", getMsg.Key)
 		}
 	case common.GetAllItemsMessage:
 		getMsg := common.GetAllItems{}
@@ -156,13 +140,10 @@ func (s *Server) processMessage(data []byte) {
 			return
 		}
 
-		s.storeLock.RLock()
-		defer s.storeLock.RUnlock()
-
-		l := s.store.GetAll()
-		s.resultLog.Println("All items requested:")
+		l := store.GetAll()
+		resultLog.Println("All items requested:")
 		for el := l.Front(); el != nil; el = el.Next() {
-			fmt.Printf("%s, ", el.Value.(*Item).Key)
+			resultLog.Printf("%s, ", el.Value.(*Item).Key)
 		}
 	default:
 		log.Printf("Unknown message type: %d", msg.Type)

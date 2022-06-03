@@ -10,9 +10,9 @@ const (
 )
 
 type Message struct {
-	//Sender string      `json:"sender"`
-	Type MessageType `json:"type"`
-	Data []byte      `json:"data"`
+	Sender string      `json:"sender"`
+	Type   MessageType `json:"type"`
+	Data   []byte      `json:"data"`
 }
 
 type Item struct {
