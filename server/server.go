@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bufio"
 	"csq/common"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/streadway/amqp"
 )
@@ -23,6 +25,7 @@ type Server struct {
 	config Config
 
 	workersChan map[string]chan *common.Message
+	wg          sync.WaitGroup
 
 	resultLog *log.Logger
 }
@@ -69,15 +72,40 @@ func (s *Server) Run() {
 	defer f.Close()
 
 	log.Println("--- Listening for messages ---")
+	log.Println("Enter q to exit...")
 
-	// TODO: exit consumer loop
-	for msg := range msgs {
-		s.demuxMessage(msg.Body)
+	exitCh := make(chan bool)
+
+	go func() {
+		s.wg.Add(1)
+		defer s.wg.Done()
+
+	loop:
+		for {
+			select {
+			case msg := (<-msgs):
+				s.demuxMessage(msg.Body)
+			case <-exitCh:
+				break loop
+			}
+		}
+
+		for _, c := range s.workersChan {
+			close(c)
+		}
+	}()
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		scanner.Scan()
+		text := scanner.Text()
+		if text == "q" {
+			exitCh <- true
+			break
+		}
 	}
 
-	for _, c := range s.workersChan {
-		close(c)
-	}
+	s.wg.Wait()
 }
 
 func (s *Server) demuxMessage(data []byte) {
@@ -92,6 +120,8 @@ func (s *Server) demuxMessage(data []byte) {
 		workerChannel := make(chan *common.Message, 100)
 		s.workersChan[msg.Sender] = workerChannel
 		go func() {
+			s.wg.Add(1)
+			defer s.wg.Done()
 			store := CreateOrderedMap()
 			for msg := range workerChannel {
 				processMessage(store, msg, s.resultLog)
